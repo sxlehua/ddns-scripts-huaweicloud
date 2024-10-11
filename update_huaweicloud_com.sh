@@ -1,35 +1,35 @@
 #!/bin/sh
 #
-# 用于华为云解析的DNS更新脚本
+# script for sending updates to huaweicloud.com
 # 2023-2024 sxlehua <sxlehua at qq dot com>
-# 华为云解析API文档 https://support.huaweicloud.com/api-dns/dns_api_62003.html
-# 华为云API签名文档 https://support.huaweicloud.com/api-dns/dns_api_30003.html
+# API documentation at https://support.huaweicloud.com/api-dns/dns_api_62003.html
+# API signature documentation at https://support.huaweicloud.com/api-dns/dns_api_30003.html
 #
-# 本脚本由 dynamic_dns_functions.sh 内的函数 send_update() 调用
-#
-# 需要在 /etc/config/ddns 中设置的选项
-# option username - 华为云API访问账号 Access Key Id,参考https://support.huaweicloud.com/devg-apisign/api-sign-provide-aksk.html获取.
-# option password - 华为云API访问密钥 Secret Access Key
-# option domain   - 完整的域名。建议主机与域名之间使用 @符号 分隔，否则将以第一个 .符号 之前的内容作为主机名
-#
+# This script is parsed by dynamic_dns_functions.sh inside send_update() function
+# 
+# useage:
+# using following options from /etc/config/ddns
+# option username  - huaweicloud Access Key Id
+# option password  - huaweicloud Secret Access Key，AK、SK documentation from https://support.huaweicloud.com/devg-apisign/api-sign-provide-aksk.html
+# option domain    - "hostname@yourdomain.TLD"	# syntax changed to remove split_FQDN() function and tld_names.dat.gz
+# 
 
-# 检查传入参数
-[ -z "$username" ] && write_log 14 "配置错误！保存华为云API访问账号的'用户名'不能为空"
-[ -z "$password" ] && write_log 14 "配置错误！保存华为云API访问密钥的'密码'不能为空"
+# Check inputs
+[ -z "$username" ] && write_log 14 "Configuration error! [username] cannot be empty"
+[ -z "$password" ] && write_log 14 "Configuration error! [password] cannot be empty"
 
-[ -z "$CURL" ] && [ -z "$CURL_SSL" ] && write_log 14 "使用华为云API需要 curl和SSL支持，请先安装"
-command -v openssl >/dev/null 2>&1 || write_log 14 "使用华为云API需要 openssl-util 支持，请先安装"
-command -v sed >/dev/null 2>&1 || write_log 14 "使用华为云API需要 sed 支持，请先安装"
+[ -z "$CURL" ] && [ -z "$CURL_SSL" ] && write_log 14 "huaweicloud API require cURL with SSL support. Please install"
+command -v openssl >/dev/null 2>&1 || write_log 14 "huaweicloud API require openssl-util support. Please install"
 
-# 公共变量
+# public variable
 local __HOST __DOMAIN __TYPE __ZONE_ID __RECORD_ID
 local __ENDPOINT="dns.cn-north-1.myhuaweicloud.com"
 local __TTL=120
 [ $use_ipv6 -eq 0 ] && __TYPE="A" || __TYPE="AAAA"
 
-# 从 $domain 分离主机和域名
-[ "${domain:0:2}" == "@." ] && domain="${domain/./}" # 主域名处理
-[ "$domain" == "${domain/@/}" ] && domain="${domain/./@}" # 未找到分隔符，兼容常用域名格式
+# Get host and domain from $domain
+[ "${domain:0:2}" == "@." ] && domain="${domain/./}"        # host
+[ "$domain" == "${domain/@/}" ] && domain="${domain/./@}"   # host with no sperator
 __HOST="${domain%%@*}"
 __DOMAIN="${domain#*@}"
 [ -z "$__HOST" -o "$__HOST" == "$__DOMAIN" ] && __HOST="@"
@@ -48,9 +48,9 @@ hcloud_transfer() {
     local _H_Content_Type=""
     
     local canonicalUri="${path}"
-    # 如果canonicalUri不以/结尾，则添加/
+    # add / if need
     echo $canonicalUri | grep -qE "/$" || canonicalUri="$canonicalUri/"
-    local canonicalQuery="$query" # 后期可能需要增加URL编码
+    local canonicalQuery="$query" # for extend
 
     local canonicalHeaders="host:$__ENDPOINT\nx-sdk-date:$timestamp\n"
     local signedHeaders="host;x-sdk-date"
@@ -119,18 +119,18 @@ add_record() {
   fi
 }
 
-# 获取Record id
+# Get DNS record
 get_record() {
   local ret=0
   local resp=`hcloud_transfer GET /v2/zones/$__ZONE_ID/recordsets "name=$__HOST.$__DOMAIN.&search_mode=equal" ""`
   __RECORD_ID=`printf "%s" $resp |  grep -Eo '"id":"[a-z0-9]+"' | cut -d':' -f2 | tr -d '"' | head -1`
   if [ "$__RECORD_ID" = "" ]; then
-    # 不存在记录，需要添加
+    # Record needs to be add
     ret=1
   else
     local remoteIp=`printf "%s" $resp | grep -Eo '"records":\[[^]]+]' | cut -d ':' -f 2-10 | tr -d '[' | tr -d ']' | tr -d '"' | head -1`
     if [ ! "$remoteIp" = "$__IP" ]; then
-      # 存在记录且不相等，需要修改记录
+      # Record needs to be updated
       ret=2
     fi
   fi
